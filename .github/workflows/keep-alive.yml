@@ -16,7 +16,7 @@ jobs:
         echo "Pinging n8n instance to keep it alive..."
         
         # Replace YOUR_N8N_URL with your actual Render n8n URL
-        N8N_URL="${{ secrets.N8N_URL }}"
+        N8N_URL="https://n8n-service-b7hs.onrender.com"
         
         if [ -z "$N8N_URL" ]; then
           echo "❌ N8N_URL secret not set"
