@@ -16,7 +16,7 @@ jobs:
         echo "Pinging n8n instance to keep it alive..."
         
         # Use your custom secret name
-        N8N_URL="${{ secrets.N8N_SECRET_URL }}"
+        N8N_URL="https://n8n-service-d2s2.onrender.com"
         
         if [ -z "$N8N_URL" ]; then
           echo "❌ N8N_SECRET_URL secret not set"
