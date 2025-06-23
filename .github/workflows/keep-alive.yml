@@ -1,0 +1,52 @@
+name: Keep n8n Service Alive
+
+on:
+  schedule:
+    # Ping every 10 minutes to prevent Render free tier sleep (adjust as needed)
+    - cron: '*/10 * * * *'
+  workflow_dispatch: # Allow manual triggering
+
+jobs:
+  ping-n8n:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Ping n8n Instance
+      run: |
+        echo "Pinging n8n instance to keep it alive..."
+        
+        # Replace YOUR_N8N_URL with your actual Render n8n URL
+        N8N_URL="${{ secrets.N8N_URL }}"
+        
+        if [ -z "$N8N_URL" ]; then
+          echo "❌ N8N_URL secret not set"
+          exit 1
+        fi
+        
+        # Ping the n8n instance
+        response=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "$N8N_URL")
+        
+        if [ "$response" -eq 200 ] || [ "$response" -eq 401 ] || [ "$response" -eq 403 ]; then
+          echo "✅ Successfully pinged n8n instance (HTTP $response)"
+          echo "Service is alive and responding"
+        else
+          echo "⚠️  Received HTTP $response from n8n instance"
+          echo "Service might be starting up or having issues"
+        fi
+        
+        # Optional: Ping health endpoint if available
+        health_response=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "$N8N_URL/healthz" 2>/dev/null || echo "000")
+        
+        if [ "$health_response" -eq 200 ]; then
+          echo "✅ Health check endpoint responding (HTTP $health_response)"
+        elif [ "$health_response" != "000" ]; then
+          echo "ℹ️  Health endpoint returned HTTP $health_response"
+        fi
+        
+        echo "Ping completed at $(date)"
+
+    - name: Log Status
+      if: always()
+      run: |
+        echo "Keep-alive job completed"
+        echo "Next scheduled run in 10 minutes"
