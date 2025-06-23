@@ -2,8 +2,8 @@ name: Keep n8n Service Alive
 
 on:
   schedule:
-    # Ping every 10 minutes to prevent Render free tier sleep (adjust as needed)
-    - cron: '*/10 * * * *'
+    # Ping every 12 minutes to prevent Render free tier sleep (adjust as needed)
+    - cron: '*/12 * * * *'
   workflow_dispatch: # Allow manual triggering
 
 jobs:
@@ -15,38 +15,92 @@ jobs:
       run: |
         echo "Pinging n8n instance to keep it alive..."
         
-        # Replace YOUR_N8N_URL with your actual Render n8n URL
-        N8N_URL="https://n8n-service-b7hs.onrender.com"
+        # Use your custom secret name
+        N8N_URL="${{ secrets.N8N_SECRET_URL }}"
         
         if [ -z "$N8N_URL" ]; then
-          echo "❌ N8N_URL secret not set"
+          echo "❌ N8N_SECRET_URL secret not set"
           exit 1
         fi
         
-        # Ping the n8n instance
-        response=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "$N8N_URL")
+        echo "🔗 Attempting to reach: $N8N_URL"
         
-        if [ "$response" -eq 200 ] || [ "$response" -eq 401 ] || [ "$response" -eq 403 ]; then
-          echo "✅ Successfully pinged n8n instance (HTTP $response)"
-          echo "Service is alive and responding"
-        else
-          echo "⚠️  Received HTTP $response from n8n instance"
-          echo "Service might be starting up or having issues"
-        fi
+        # Function to ping with retries
+        ping_with_retry() {
+          local url=$1
+          local max_retries=3
+          local timeout=60
+          local retry_count=0
+          
+          while [ $retry_count -lt $max_retries ]; do
+            retry_count=$((retry_count + 1))
+            echo "🔄 Attempt $retry_count of $max_retries (timeout: ${timeout}s)..."
+            
+            response=$(curl -s -o /dev/null -w "%{http_code}" --max-time $timeout --connect-timeout 30 "$url" 2>/dev/null || echo "timeout")
+            
+            case "$response" in
+              "200"|"401"|"403"|"302")
+                echo "✅ Successfully pinged n8n instance (HTTP $response)"
+                echo "Service is alive and responding"
+                return 0
+                ;;
+              "timeout"|"000")
+                echo "⚠️  Attempt $retry_count timed out or failed"
+                if [ $retry_count -lt $max_retries ]; then
+                  echo "⏳ Waiting 10 seconds before retry..."
+                  sleep 10
+                fi
+                ;;
+              *)
+                echo "⚠️  Received HTTP $response from n8n instance"
+                if [ "$response" -ge 500 ]; then
+                  echo "Server error - service might be starting up"
+                  if [ $retry_count -lt $max_retries ]; then
+                    echo "⏳ Waiting 10 seconds before retry..."
+                    sleep 10
+                  fi
+                elif [ "$response" -ge 400 ]; then
+                  echo "Client error - but service is responding"
+                  return 0
+                else
+                  echo "Unexpected response code"
+                  return 0
+                fi
+                ;;
+            esac
+          done
+          
+          echo "❌ All $max_retries attempts failed"
+          echo "Note: Even failed requests help wake up sleeping Render services"
+          return 1
+        }
         
-        # Optional: Ping health endpoint if available
-        health_response=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "$N8N_URL/healthz" 2>/dev/null || echo "000")
+        # Ping the main n8n instance with retries
+        ping_with_retry "$N8N_URL"
+        main_result=$?
         
-        if [ "$health_response" -eq 200 ]; then
-          echo "✅ Health check endpoint responding (HTTP $health_response)"
-        elif [ "$health_response" != "000" ]; then
-          echo "ℹ️  Health endpoint returned HTTP $health_response"
+        # Optional: Try health endpoint if main ping succeeded
+        if [ $main_result -eq 0 ]; then
+          echo "🔍 Checking health endpoint..."
+          health_response=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "$N8N_URL/healthz" 2>/dev/null || echo "000")
+          
+          if [ "$health_response" = "200" ]; then
+            echo "✅ Health check endpoint responding (HTTP $health_response)"
+          elif [ "$health_response" != "000" ]; then
+            echo "ℹ️  Health endpoint returned HTTP $health_response"
+          else
+            echo "ℹ️  Health endpoint not available or timed out"
+          fi
         fi
         
         echo "Ping completed at $(date)"
+        
+        # Don't fail the action even if all retries failed
+        # The ping attempts themselves help wake up the service
+        exit 0
 
     - name: Log Status
       if: always()
       run: |
         echo "Keep-alive job completed"
-        echo "Next scheduled run in 10 minutes"
+        echo "Next scheduled run in 12 minutes"
